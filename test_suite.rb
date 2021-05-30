@@ -2,6 +2,8 @@ require_relative './calculator'
 
 class TestSuite
 
+  # AssertResult is the result of a single assertion, with the ability to print
+  # the source code that caused a failure.
   class AssertResult
     def initialize(is_pass, backtrace)
       @is_pass = is_pass
@@ -12,6 +14,10 @@ class TestSuite
       @is_pass
     end
 
+    def fail?
+      !@is_pass
+    end
+
     def to_s
       pass? ? '.' : 'F'
     end
@@ -20,61 +26,74 @@ class TestSuite
       return nil if pass?
 
       "FAIL:\n" + 
-      "  #{@backtrace}\n" +
-      "  #{source_code}\n"
+      "    #{source_code}\n" +
+      "  in #{@backtrace}\n"
     end
 
     def source_code
-      IO.readlines(@backtrace.absolute_path)[@backtrace.lineno - 1, 1].first
+      lines = IO.readlines(@backtrace.absolute_path)[@backtrace.lineno - 1, 1]
+      lines.first.sub(/^\s+/, '').chomp
     end
   end
 
-  def initialize(name, &blk)
-    @name = name
+  # TestResult is essentially a list of AssertResult objects.
+  class TestResult
+    def initialize(assert_results)
+      @assert_results = assert_results
+    end
+
+    def to_s
+      summary = '  ' + @assert_results.map(&:to_s).join('')
+
+      failures = @assert_results.select(&:fail?).map(&:failure_msg)
+      indented_failures = failures.map { |x| x.sub(/^/, '  ')}
+
+      summary + "\n\n" + indented_failures.join("\n")
+    end
+
+    def num_assertions
+      @num_assertions ||= @assert_results.size
+    end
+
+    def num_failures
+      @num_failures ||= @assert_results.count(&:fail?)
+    end
+  end
+
+  def initialize(suite_name, &blk)
+    @suite_name = suite_name
     @blk = blk
     @tests = {}
     @test_results = {}
   end
 
   def run
+    # Save the tests as blocks, but don't execute them yet.
     instance_eval(&@blk)
 
-    @tests.each do |name, blk|
-      @cur_test = name
+    # Now execute them.
+    @tests.each do |test_name, blk|
+      @cur_test = test_name
       instance_eval(&blk)
+
+      result = TestResult.new(@test_results[@cur_test])
+      @test_results[@cur_test] = result
+
+      puts "\n#{@suite_name} #{test_name}:\n#{result}"
     end
 
-    print_results
-  end
-
-  def print_results
-    num_assertions = 0
-    num_failures = 0
-
-    @test_results.each do |name, assertion_results|
-      puts "#{@name} #{name}:"
-      puts '  ' + assertion_results.map(&:to_s).join("")
-
-      num_assertions += assertion_results.count
-      num_failures += assertion_results.count {|x| !x.pass? } 
-    end
-
-    if num_failures > 0
-      puts "\nFAILURES:"
-      @test_results.each do |name, assertion_results|
-      end
-    end
+    # Print test result summary.
+    all_results = @test_results.values
+    num_assertions = all_results.map(&:num_assertions).sum
+    num_failures = all_results.map(&:num_failures).sum
 
     assertion_text = num_assertions == 1 ? "assertion" : "assertions"
     failure_text = num_failures == 1 ? "failure" : "failures"
-    puts "\n#{num_assertions} #{assertion_text}, #{num_failures} #{failure_text}."
+    puts "#{num_assertions} #{assertion_text}, #{num_failures} #{failure_text}."
   end
 
   def test(name, &blk)
-    if @tests[name]
-      # TODO: Add line number.
-      raise "You've already defined a test named '#{name}'"
-    end
+    raise "You've already defined a test named '#{name}'" if @tests[name]
 
     @tests[name] = blk
   end
@@ -83,6 +102,22 @@ class TestSuite
     @test_results[@cur_test] ||= []
     @test_results[@cur_test] << AssertResult.new(result, caller_locations.first)
   end
+
+  def assert_raise(expected_err=StandardError, &blk)
+    @test_results[@cur_test] ||= []
+    blk.call
+    @test_results[@cur_test] << AssertResult.new(false, caller_locations.first)
+  rescue expected_err
+    @test_results[@cur_test] << AssertResult.new(true, caller_locations.first)
+  end
+
+  def assert_no_raise(expected_err=StandardError, &blk)
+    @test_results[@cur_test] ||= []
+    blk.call
+    @test_results[@cur_test] << AssertResult.new(true, caller_locations.first)
+  rescue expected_err
+    @test_results[@cur_test] << AssertResult.new(false, caller_locations.first)
+  end
 end
 
 calculator_test = TestSuite.new("Calculator") do
@@ -90,34 +125,23 @@ calculator_test = TestSuite.new("Calculator") do
     Calculator.new
   end
 
-  test("add works") do
+  test("can add positive numbers") do
     assert(calculator.add(1, 2) == 3)
-    assert(calculator.add(2, 2) == 5)
+    assert(calculator.add(2, 2) == 4)
     assert(calculator.add(1, 1) == 2)
   end
 
-  #TODO: divide by zero raises
+  test("can add negative numbers") do
+    assert(calculator.add(-1, 2) == 1)
+    assert(calculator.add(2, -2) == 0)
+    assert(calculator.add(-1, -1) == -2)
+  end
+
+  test("can divide") do
+    assert(calculator.div(8, 2) == 4)
+    assert_raise { calculator.div(8, 0) }
+    assert_no_raise { calculator.div(8, 1) }
+  end
 end
 
 calculator_test.run
-
-
-__END__
-
-TestSuite.new("Arithmetic") do
-  def calculator
-    Calculator.new
-  end
-
-  test("add works") do
-    assert(calculator.add(1, 2) == 3)
-  end
-
-  test(
-    TestSuite.new("negative numbers", self) do
-      test("add works") do
-        assert(calculator.add(-1, 2) == 1)
-      end
-    end
-  )
-end
