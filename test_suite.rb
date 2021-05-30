@@ -146,4 +146,33 @@ calculator_test = TestSuite.new("Calculator") do
   end
 end
 
+class SharedCalculatorTests
+  def self.new(calculator)
+    Proc.new do
+      test("can add positive numbers") do
+        assert(calculator.add(1, 2) == 3)
+        assert(calculator.add(2, 2) == 4)
+        assert(calculator.add(1, 1) == 2)
+      end
+
+      test("can add negative numbers") do
+        assert(calculator.add(-1, 2) == 1)
+        assert(calculator.add(2, -2) == 0)
+        assert(calculator.add(-1, -1) == -2)
+      end
+
+      test("can divide") do
+        assert(calculator.div(8, 2) == 4)
+        assert_raise { calculator.div(8, 0) }
+        assert_no_raise { calculator.div(8, 1) }
+      end
+    end
+  end
+end
+
 calculator_test.run
+
+configured_calc_test = TestSuite.new(
+  "Calculator", &SharedCalculatorTests.new(Calculator.new)
+)
+configured_calc_test.run
