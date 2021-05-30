@@ -48,7 +48,7 @@ class TestSuite
       failures = @assert_results.select(&:fail?).map(&:failure_msg)
       indented_failures = failures.map { |x| x.sub(/^/, '  ')}
 
-      summary + "\n\n" + indented_failures.join("\n")
+      (summary + "\n\n" + indented_failures.join("\n")).chomp
     end
 
     def num_assertions
@@ -64,7 +64,7 @@ class TestSuite
     @suite_name = suite_name
     @blk = blk
     @tests = {}
-    @test_results = {}
+    @results = {}
   end
 
   def run
@@ -76,14 +76,14 @@ class TestSuite
       @cur_test = test_name
       instance_eval(&blk)
 
-      result = TestResult.new(@test_results[@cur_test])
-      @test_results[@cur_test] = result
+      result = TestResult.new(@results[@cur_test])
+      @results[@cur_test] = result
 
-      puts "\n#{@suite_name} #{test_name}:\n#{result}"
+      printf "\n#{@suite_name} #{test_name}:\n#{result}"
     end
 
     # Print test result summary.
-    all_results = @test_results.values
+    all_results = @results.values
     num_assertions = all_results.map(&:num_assertions).sum
     num_failures = all_results.map(&:num_failures).sum
 
@@ -99,24 +99,26 @@ class TestSuite
   end
 
   def assert(result)
-    @test_results[@cur_test] ||= []
-    @test_results[@cur_test] << AssertResult.new(result, caller_locations.first)
+    @results[@cur_test] ||= []
+    @results[@cur_test] << AssertResult.new(result, caller_locations.first)
   end
 
   def assert_raise(expected_err=StandardError, &blk)
-    @test_results[@cur_test] ||= []
-    blk.call
-    @test_results[@cur_test] << AssertResult.new(false, caller_locations.first)
-  rescue expected_err
-    @test_results[@cur_test] << AssertResult.new(true, caller_locations.first)
+    assert_block(expected_err, true, &blk)
   end
 
   def assert_no_raise(expected_err=StandardError, &blk)
-    @test_results[@cur_test] ||= []
+    assert_block(expected_err, false, &blk)
+  end
+
+  private
+
+  def assert_block(expected_err=StandardError, will_error, &blk)
+    @results[@cur_test] ||= []
     blk.call
-    @test_results[@cur_test] << AssertResult.new(true, caller_locations.first)
+    @results[@cur_test] << AssertResult.new(!will_error, caller_locations.first)
   rescue expected_err
-    @test_results[@cur_test] << AssertResult.new(false, caller_locations.first)
+    @results[@cur_test] << AssertResult.new(will_error, caller_locations.first)
   end
 end
 
